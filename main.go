@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,6 +110,9 @@ func run() int {
 			return fail("the installed ffmpeg does not have the %s encoder", enc.codec())
 		}
 		if enc.GPU {
+			if runtime.GOOS != "linux" {
+				return fail("-gpu uses VAAPI and only works on Linux; run without -gpu to convert on the CPU")
+			}
 			if _, err := os.Stat(vaapiDevice); err != nil {
 				return fail("GPU not found at %s", vaapiDevice)
 			}

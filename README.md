@@ -2,23 +2,89 @@
 
 Compacta os vídeos do WhatsApp de um celular Android conectado por cabo. O programa reconverte cada vídeo para H.265 (HEVC) no PC e coloca o arquivo menor no lugar do original, que fica guardado em uma pasta de backup.
 
-Roda no Linux, é escrito em Go e usa o `adb` e o `ffmpeg` como programas externos.
+É escrito em Go e usa o `adb` e o `ffmpeg` como programas externos. Foi feito e testado no Linux; também compila para macOS e Windows, onde a conversão pela GPU (`-gpu`) não está disponível.
 
 ## Requisitos
 
 - Go 1.26 ou mais novo, para compilar.
-- `adb` e `ffmpeg` (com `ffprobe`): `sudo apt install adb ffmpeg`
-- Depuração USB ativada no celular. Ao conectar o cabo, aceite o aviso de autorização na tela.
-- Para a opção `-gpu`: uma GPU com VAAPI em `/dev/dri/renderD128` (Intel ou AMD).
+- `adb` e `ffmpeg` (com `ffprobe` e o codificador `libx265`). O `make deps` instala os dois (veja abaixo).
+- Depuração USB ativada no celular (veja [Preparar o celular](#preparar-o-celular)).
+- Para a opção `-gpu`: Linux com uma GPU com VAAPI em `/dev/dri/renderD128` (Intel ou AMD).
 
-## Compilar
+## Preparar o celular
+
+O programa acessa o celular pela depuração USB, que fica nas opções do desenvolvedor do Android. Os nomes dos menus mudam um pouco de fabricante para fabricante.
+
+### 1. Ativar o modo desenvolvedor
+
+1. Abra **Configurações** > **Sobre o telefone**.
+2. Encontre o **Número da versão** (em inglês, *Build number*):
+   - **Samsung:** Sobre o telefone > Informações do software > Número de compilação.
+   - **Xiaomi, Redmi e Poco:** Sobre o telefone > toque em **Versão do MIUI** ou **Versão do HyperOS**.
+   - **Motorola, Pixel e outros:** Sobre o telefone > Número da versão.
+3. Toque **7 vezes seguidas** nele. O celular pede o PIN ou a senha e avisa: "Você agora é um desenvolvedor".
+
+### 2. Ativar a depuração USB
+
+1. Abra **Configurações** > **Opções do desenvolvedor**. Na maioria dos aparelhos fica em Configurações > Sistema; na Samsung, no fim da lista de Configurações.
+2. Ligue **Depuração USB** e confirme.
+3. **Xiaomi, Redmi e Poco:** ligue também **Depuração USB (configurações de segurança)**. Sem isso o programa não consegue trocar os arquivos. Essa opção exige uma conta Xiaomi e às vezes um chip de celular no aparelho.
+
+### 3. Conectar ao PC
+
+1. Ligue o celular ao PC com um cabo que transfira dados (alguns cabos só carregam).
+2. Na tela do celular aparece **Permitir depuração USB?**. Marque **Sempre permitir neste computador** e toque em **Permitir**.
+3. Confira no PC:
+
+   ```
+   adb devices
+   ```
+
+   O celular deve aparecer com o estado `device`.
+
+| Estado em `adb devices` | O que fazer |
+|---|---|
+| nada aparece | Troque o cabo ou a porta USB. Em alguns aparelhos, escolha o modo **Transferência de arquivos** na notificação de USB. |
+| `unauthorized` | Desbloqueie o celular e aceite o aviso de depuração. Se ele não aparecer, desligue e ligue a Depuração USB. |
+| `no permissions` (Linux) | Instale o pacote `adb` da distribuição, que traz as regras de acesso ao USB, e reconecte o cabo. |
+
+### Depois de terminar
+
+Por segurança, desligue a **Depuração USB** quando não for mais usar o programa. Em Opções do desenvolvedor, **Revogar autorizações de depuração USB** apaga a permissão dada ao PC. Dá para desativar o modo desenvolvedor inteiro pela chave no topo da mesma tela.
+
+## Instalar
+
+### Linux e macOS
 
 ```
-cd ~/go/src/wacompress
+make deps       # instala adb e ffmpeg (apt, dnf, pacman, zypper ou Homebrew)
+make install    # compila e instala em ~/.local/bin
+```
+
+Para instalar em outro lugar: `make install PREFIX=/usr/local` (pode precisar de `sudo`). Para remover: `make uninstall`.
+
+No Fedora, o `ffmpeg-free` padrão não tem `libx265`; ative o RPM Fusion e instale o `ffmpeg` de lá.
+
+### Windows
+
+Instale as dependências e compile com o Go:
+
+```
+winget install Gyan.FFmpeg Google.PlatformTools
 go build
 ```
 
-Isso gera o executável `./wacompress`. Os testes rodam com `go test ./...`.
+Isso gera `wacompress.exe`. Também dá para usar um executável pronto gerado por `make dist` em outra máquina.
+
+### Outros comandos do make
+
+| Comando | Função |
+|---|---|
+| `make` | Compila `./wacompress` para esta máquina. |
+| `make test` | Roda `go vet` e os testes. |
+| `make dist` | Gera executáveis para Linux, macOS e Windows (amd64 e arm64) em `dist/`. |
+| `make clean` | Apaga o executável e a pasta `dist/`. |
+| `make help` | Lista os comandos. |
 
 ## Uso
 
