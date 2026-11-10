@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -69,6 +70,11 @@ func (s *State) done(f RemoteFile) bool {
 	case statusConverted:
 		return f.Size == e.NewSize
 	case statusSkipped:
+		// Videos skipped only because HDR10+ could not be kept are retried: the tools
+		// for it may have been installed since.
+		if strings.Contains(e.Reason, "HDR10+") || strings.Contains(e.Reason, "hdr dynamic metadata") {
+			return false
+		}
 		return f.Size == e.OrigSize
 	}
 	return false

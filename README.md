@@ -8,6 +8,7 @@ Compacta os vídeos do WhatsApp de um celular Android conectado por cabo. O prog
 
 - Go 1.26 ou mais novo, para compilar.
 - `adb` e `ffmpeg` (com `ffprobe` e o codificador `libx265`). O `make deps` instala os dois (veja abaixo).
+- Para manter o HDR10+ (vídeos de câmeras Samsung, por exemplo): `mkvmerge` (pacote `mkvtoolnix`, também instalado pelo `make deps`) e o [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool) (`make hdr10plus-tool`). Sem eles, esses vídeos são pulados.
 - Depuração USB ativada no celular (veja [Preparar o celular](#preparar-o-celular)).
 - Para a opção `-gpu`: Linux com uma GPU com VAAPI em `/dev/dri/renderD128` (Intel ou AMD).
 
@@ -57,7 +58,8 @@ Por segurança, desligue a **Depuração USB** quando não for mais usar o progr
 ### Linux e macOS
 
 ```
-make deps       # instala adb e ffmpeg (apt, dnf, pacman, zypper ou Homebrew)
+make deps            # instala adb, ffmpeg e mkvtoolnix (apt, dnf, pacman, zypper ou Homebrew)
+make hdr10plus-tool  # baixa o hdr10plus_tool para ~/.local/bin (Linux x86_64; confere o SHA-256)
 make install    # compila e instala em ~/.local/bin
 ```
 
@@ -180,7 +182,7 @@ Vídeos com menos de 128 pixels de largura ou altura não são aceitos pela GPU 
 
 Vídeos de 10 bits continuam em 10 bits, e a curva HDR (HDR10 ou HLG) e os metadados HDR10 são mantidos. Limites:
 
-- **HDR10+:** a conversão não consegue manter os metadados dinâmicos. Esses vídeos são pulados.
+- **HDR10+:** os codificadores não gravam os metadados dinâmicos, então esses vídeos seguem um caminho mais longo: o `hdr10plus_tool` extrai os metadados do original e os reinjeta no vídeo convertido, e o `mkvmerge` remonta o vídeo com o tempo exato de cada quadro do original (vídeos de celular costumam ter taxa de quadros variável). Depois o áudio e os metadados originais são juntados e o resultado passa pelas mesmas conferências, incluindo a de HDR10+. Sem essas duas ferramentas instaladas, os vídeos HDR10+ são pulados; quando elas forem instaladas, os pulados por esse motivo voltam para a fila.
 - **Dolby Vision:** a camada Dolby Vision se perde e fica o HDR comum que vem junto. Se o arquivo não tiver essa base compatível, é pulado.
 
 ## Backup e registro

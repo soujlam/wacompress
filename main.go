@@ -443,6 +443,11 @@ func processOne(ctx context.Context, dev Device, f RemoteFile, cfg config, u *ui
 	if why := hdrProblem(orig, nil); why != "" {
 		return skipped(why)
 	}
+	if orig.hasHDR10Plus() {
+		if why := hdr10PlusProblem(orig, hdr10PlusMissing()); why != "" {
+			return skipped(why)
+		}
+	}
 	if why := audioProblem(orig, ext); why != "" {
 		return skipped(why)
 	}

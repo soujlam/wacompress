@@ -285,13 +285,24 @@ func (e Encoder) codec() string {
 // ffmpegArgs builds the conversion from in to out. src is the probe of the original:
 // 10-bit (HDR) videos stay 10-bit and the color information is passed through.
 func ffmpegArgs(in, out string, enc Encoder, src Probe) []string {
+	return encodeArgs(in, out, enc, src, false)
+}
+
+// encodeArgs builds the ffmpeg arguments for the conversion. With raw set, only the video
+// is encoded, frame for frame, into a bare HEVC stream (used by the HDR10+ path).
+func encodeArgs(in, out string, enc Encoder, src Probe, raw bool) []string {
 	enc = enc.forSource(src)
 	deep := bitDepth(src.PixFmt) > 8
 	args := []string{"-hide_banner", "-nostdin", "-y", "-loglevel", "error"}
 	if enc.GPU {
 		args = append(args, "-vaapi_device", vaapiDevice)
 	}
-	args = append(args, "-i", in, "-map", "0:v:0", "-map", "0:a?")
+	args = append(args, "-i", in, "-map", "0:v:0")
+	if raw {
+		args = append(args, "-fps_mode", "passthrough")
+	} else {
+		args = append(args, "-map", "0:a?")
+	}
 	switch {
 	case enc.GPU && deep:
 		args = append(args, "-vf", "format=p010,hwupload",
@@ -310,19 +321,37 @@ func ffmpegArgs(in, out string, enc Encoder, src Probe) []string {
 			args = append(args, c[0], c[1])
 		}
 	}
+	if raw {
+		return append(args, "-progress", "pipe:1", "-nostats", "-f", "hevc", out)
+	}
 	args = append(args, "-c:a", "copy", "-map_metadata", "0")
+	args = append(args, containerArgs(out)...)
+	return append(args, "-progress", "pipe:1", "-nostats", out)
+}
+
+// containerArgs returns the muxer options for the output file type.
+func containerArgs(out string) []string {
 	switch strings.ToLower(filepath.Ext(out)) {
 	case ".mp4", ".mov":
 		// hvc1 so Apple devices play it; use_metadata_tags keeps non-standard tags.
-		args = append(args, "-tag:v", "hvc1", "-movflags", "+faststart+use_metadata_tags")
+		return []string{"-tag:v", "hvc1", "-movflags", "+faststart+use_metadata_tags"}
 	}
-	return append(args, "-progress", "pipe:1", "-nostats", out)
+	return nil
 }
 
 // convert re-encodes in to H.265 at out. onProgress receives the completed fraction
 // (0 to 1) and the speed reported by ffmpeg (e.g. "2.3x").
 func convert(ctx context.Context, in, out string, enc Encoder, src Probe, onProgress func(frac float64, speed string)) error {
-	cmd := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs(in, out, enc, src)...)
+	if src.hasHDR10Plus() && hdr10PlusProblem(src, hdr10PlusMissing()) == "" {
+		return convertHDR10Plus(ctx, in, out, enc, src, onProgress)
+	}
+	return runFFmpeg(ctx, ffmpegArgs(in, out, enc, src), src.Duration, onProgress)
+}
+
+// runFFmpeg runs ffmpeg with args that include "-progress pipe:1" and reports progress
+// against the given duration in seconds.
+func runFFmpeg(ctx context.Context, args []string, duration float64, onProgress func(frac float64, speed string)) error {
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	var errb bytes.Buffer
 	cmd.Stderr = &errb
 	stdout, err := cmd.StdoutPipe()
@@ -332,7 +361,6 @@ func convert(ctx context.Context, in, out string, enc Encoder, src Probe, onProg
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	duration := src.Duration
 	var frac float64
 	speed := ""
 	sc := bufio.NewScanner(stdout)

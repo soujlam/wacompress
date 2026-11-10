@@ -109,6 +109,7 @@ func TestStateDoneAndRoundTrip(t *testing.T) {
 	s.Entries["/a.mp4"] = Entry{Status: statusConverted, OrigSize: 100, NewSize: 40, When: time.Now()}
 	s.Entries["/b.mp4"] = Entry{Status: statusSkipped, OrigSize: 100}
 	s.Entries["/c.mp4"] = Entry{Status: statusFailed, OrigSize: 100}
+	s.Entries["/hdr.mp4"] = Entry{Status: statusSkipped, OrigSize: 100, Reason: "HDR metadata lost: hdr dynamic metadata"}
 	if err := s.save(); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +124,8 @@ func TestStateDoneAndRoundTrip(t *testing.T) {
 		{RemoteFile{"/a.mp4", 40, 0}, true},
 		{RemoteFile{"/a.mp4", 100, 0}, false}, // the file is a different one again
 		{RemoteFile{"/b.mp4", 100, 0}, true},
-		{RemoteFile{"/c.mp4", 100, 0}, false}, // a failure is retried
+		{RemoteFile{"/c.mp4", 100, 0}, false},   // a failure is retried
+		{RemoteFile{"/hdr.mp4", 100, 0}, false}, // skipped for HDR10+ is retried
 		{RemoteFile{"/novo.mp4", 1, 0}, false},
 	}
 	for _, c := range cases {
@@ -397,5 +399,54 @@ func TestBackupConfig(t *testing.T) {
 	os.RemoveAll(filepath.Join(dir, "disco"))
 	if err := checkBackupDir(want); err == nil {
 		t.Error("a configured folder that vanished (disk unplugged) should be refused")
+	}
+}
+
+func TestHDR10Plus(t *testing.T) {
+	p := Probe{VideoCodec: "hevc", SideData: []string{"HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}}
+	if !p.hasHDR10Plus() {
+		t.Fatal("HDR10+ side data not detected")
+	}
+	if why := hdr10PlusProblem(p, ""); why != "" {
+		t.Errorf("hevc with tools: %s", why)
+	}
+	if why := hdr10PlusProblem(p, "mkvmerge"); !strings.Contains(why, "mkvmerge") {
+		t.Errorf("missing tool: %q", why)
+	}
+	p.VideoCodec = "av1"
+	if hdr10PlusProblem(p, "") == "" {
+		t.Error("HDR10+ in av1 should be refused")
+	}
+
+	raw := strings.Join(encodeArgs("in.mp4", "v.hevc", Encoder{GPU: true, QP: 33}, Probe{PixFmt: "yuv420p10le", ColorTransfer: "smpte2084"}, true), " ")
+	for _, want := range []string{"-fps_mode passthrough", "-f hevc v.hevc", "main10", "-color_trc smpte2084"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("raw args without %q: %s", want, raw)
+		}
+	}
+	for _, bad := range []string{"0:a?", "-c:a", "movflags"} {
+		if strings.Contains(raw, bad) {
+			t.Errorf("raw args with %q: %s", bad, raw)
+		}
+	}
+}
+
+func TestTimestamps(t *testing.T) {
+	js := `{"packets":[{"pts":3000},{"pts":0},{"pts":1500},{"pts":7500}],"streams":[{"time_base":"1/90000"}]}`
+	ms, err := parseTimestamps([]byte(js))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []float64{0, 1500.0 / 90, 3000.0 / 90, 7500.0 / 90}
+	for i := range want {
+		if d := ms[i] - want[i]; d > 1e-9 || d < -1e-9 {
+			t.Fatalf("got %v want %v", ms, want)
+		}
+	}
+	if got := timestampFile(ms[:2]); got != "# timestamp format v2\n0.0000\n16.6667\n" {
+		t.Errorf("timestampFile = %q", got)
+	}
+	if _, err := parseTimestamps([]byte(`{"packets":[{}],"streams":[{"time_base":"1/90000"}]}`)); err == nil {
+		t.Error("a frame without pts should fail")
 	}
 }
